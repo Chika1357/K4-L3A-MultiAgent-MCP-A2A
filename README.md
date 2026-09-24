@@ -13,6 +13,14 @@ Agent phải:
 
 Customer message không phải ground truth. Không được tự đoán dữ liệu hoặc tạo `evidence_ref` giả.
 
+## Dữ liệu
+
+Tham khảo dữ liệu tại: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+
+## Quy tắc đặt tên
+
+Làm nhóm hoặc cá nhân, khi fork về các bạn giữ nguyên tên gốc repo, không đổi tên
+
 ## 1. Cài đặt
 
 Yêu cầu Python 3.11 trở lên.
