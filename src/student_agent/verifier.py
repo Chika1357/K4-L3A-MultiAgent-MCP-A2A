@@ -123,7 +123,13 @@ class VerifierAgent:
                 "ranked_causes": [
                     {"cause_code": cause_code, "rank": 1}
                 ][:5],
-                "responsible_parties": responsible_parties[:5],
+                "responsible_parties": [
+                    {**party, "party_id": None}
+                    if party.get("party_type") == "seller"
+                    and party.get("party_id") not in entities["seller_ids"]
+                    else party
+                    for party in responsible_parties[:5]
+                ],
             },
             "evidence_refs": valid_evidence_refs,
             "data_conflicts": [

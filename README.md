@@ -144,7 +144,7 @@ Competition không chấm tên framework hay số lượng class. Scorer đánh 
 
 Hoàn thiện mô tả thiết kế trong `ARCHITECTURE.md`.
 
-## 6. Chạy và kiểm tra
+## 6. Chạy và kiểm tras
 
 ```bash
 day09 run

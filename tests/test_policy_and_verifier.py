@@ -99,6 +99,28 @@ def test_late_delivery_seller(contracts: Contracts) -> None:
     assert output["financial_resolution"]["recommended_refund_brl"] == 15.00
 
 
+def test_verifier_rejects_seller_outside_order(contracts: Contracts) -> None:
+    result = PolicyAgent().evaluate(
+        {"case_id": "L3A_CASE_003"},
+        {
+            "order_status": "delivered",
+            "shipment_info": {"is_late": True, "late_by_seller": True},
+            "seller_id": "seller-from-policy",
+        },
+    )
+
+    output = VerifierAgent(contracts).verify_and_build(
+        case_id="L3A_CASE_003",
+        policy_result=result,
+        affected_entities={"order_ids": [], "item_ids": [], "seller_ids": ["seller-from-order"], "payment_references": [], "shipment_ids": []},
+        evidence_refs=["ev_abcdefghij12345678901234"],
+    )
+
+    assert output["root_cause_analysis"]["responsible_parties"] == [
+        {"party_type": "seller", "party_id": None}
+    ]
+
+
 def test_real_input_structure_with_claims(contracts: Contracts) -> None:
     policy = PolicyAgent()
     verifier = VerifierAgent(contracts)
