@@ -12,6 +12,7 @@ from .cases import CaseSet
 from .contracts import Contracts
 
 SECRET_PATTERN = re.compile(r"sk-team-[A-Za-z0-9_-]{8,}")
+EVIDENCE_REF_PATTERN = re.compile(r"^ev_[A-Za-z0-9_-]{20,96}$")
 MAX_FILE_BYTES = 1024 * 1024
 MAX_SUBMISSION_BYTES = 12 * 1024 * 1024
 
@@ -37,6 +38,30 @@ def build_manifest(case_set: CaseSet) -> dict[str, Any]:
         "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "client": {"name": "day09-student-starter", "version": "0.1.0"},
     }
+
+
+def expected_submission_members(case_set: CaseSet) -> list[str]:
+    return [
+        "manifest.json",
+        "trace.jsonl",
+        *[f"outputs/{case_id}.json" for case_id in case_set.case_ids],
+    ]
+
+
+def _evidence_refs(value: Any) -> set[str]:
+    if isinstance(value, str):
+        return {value} if EVIDENCE_REF_PATTERN.fullmatch(value) else set()
+    if isinstance(value, list):
+        refs: set[str] = set()
+        for item in value:
+            refs.update(_evidence_refs(item))
+        return refs
+    if isinstance(value, dict):
+        refs: set[str] = set()
+        for item in value.values():
+            refs.update(_evidence_refs(item))
+        return refs
+    return set()
 
 
 def validate_artifacts(
@@ -65,6 +90,8 @@ def validate_artifacts(
         raise ValueError("traces/trace.jsonl is missing or not UTF-8") from exc
     normalized_lines: list[str] = []
     seen_events: set[str] = set()
+    event_types_by_case: dict[str, list[str]] = {case_id: [] for case_id in case_set.case_ids}
+    consumed_refs_by_case: dict[str, set[str]] = {case_id: set() for case_id in case_set.case_ids}
     for number, line in enumerate(trace_lines, 1):
         if not line.strip():
             continue
@@ -78,12 +105,63 @@ def validate_artifacts(
         if event["event_id"] in seen_events:
             raise ValueError(f"traces/trace.jsonl:{number}: duplicate event_id")
         seen_events.add(event["event_id"])
+        event_types_by_case[event["case_id"]].append(event["event_type"])
+        if event["event_type"] == "tool_result_consumed":
+            consumed_refs_by_case[event["case_id"]].update(event.get("evidence_refs", []))
         normalized_lines.append(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
+
+    for case_id in case_set.case_ids:
+        event_types = event_types_by_case[case_id]
+        if event_types.count("case_received") != 1:
+            raise ValueError(f"{case_id}: trace must contain exactly one case_received event")
+        if event_types.count("case_finalized") != 1:
+            raise ValueError(f"{case_id}: trace must contain exactly one case_finalized event")
+        if event_types.index("case_received") > event_types.index("case_finalized"):
+            raise ValueError(f"{case_id}: case_finalized appears before case_received")
+        for required in ("tool_result_consumed", "policy_decided", "verification_completed"):
+            if required not in event_types:
+                raise ValueError(f"{case_id}: trace is missing {required}")
+        cited_refs = _evidence_refs(outputs[case_id])
+        missing_refs = sorted(cited_refs - consumed_refs_by_case[case_id])
+        if missing_refs:
+            raise ValueError(
+                f"{case_id}: output cites evidence refs without same-case "
+                f"tool_result_consumed events: {missing_refs}"
+            )
 
     serialized = [json.dumps(value, ensure_ascii=False) for value in outputs.values()]
     if SECRET_PATTERN.search("\n".join([*serialized, *normalized_lines])):
         raise ValueError("a Team API Key appears in output or trace")
     return outputs, normalized_lines
+
+
+def validate_submission_zip(path: Path, case_set: CaseSet, contracts: Contracts) -> None:
+    expected = expected_submission_members(case_set)
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            actual = archive.namelist()
+            if len(actual) != len(set(actual)):
+                raise ValueError("submission ZIP contains duplicate member names")
+            if actual != expected:
+                missing = sorted(set(expected) - set(actual))
+                extra = sorted(set(actual) - set(expected))
+                raise ValueError(
+                    "submission ZIP must contain only manifest.json, trace.jsonl, "
+                    f"and outputs/<case_id>.json; missing={missing}, extra={extra}"
+                )
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            contracts.validate_manifest(manifest)
+            for case_id in case_set.case_ids:
+                output = json.loads(archive.read(f"outputs/{case_id}.json").decode("utf-8"))
+                contracts.validate_output(output, f"outputs/{case_id}.json")
+                if output.get("case_id") != case_id:
+                    raise ValueError(f"outputs/{case_id}.json has a mismatched case_id")
+            trace_lines = archive.read("trace.jsonl").decode("utf-8").splitlines()
+            for number, line in enumerate(trace_lines, 1):
+                if line.strip():
+                    contracts.validate_trace(json.loads(line), f"trace.jsonl:{number}")
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"{path}: not a valid ZIP file") from exc
 
 
 def package_submission(root: Path, destination: Path, artifacts_root: Path | None = None) -> Path:
@@ -117,4 +195,5 @@ def package_submission(root: Path, destination: Path, artifacts_root: Path | Non
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, payload in payloads.items():
             archive.writestr(name, payload)
+    validate_submission_zip(destination, case_set, contracts)
     return destination

@@ -13,7 +13,7 @@ from .cases import load_case_set
 from .config import Settings
 from .contracts import Contracts
 from .mcp_gateway import connect_gateway
-from .submission import package_submission, validate_artifacts
+from .submission import expected_submission_members, package_submission, validate_artifacts
 from .trace import TraceWriter
 from .workflow import solve_case
 
@@ -148,7 +148,8 @@ def main() -> None:
             print(f"OK: {len(case_set.case_ids)} outputs / {len(trace)} trace events")
         elif args.command == "package":
             destination = package_submission(root, root / args.output, root / args.artifacts_root)
-            print(f"OK: {destination}")
+            member_count = len(expected_submission_members(load_case_set(root)))
+            print(f"OK: {destination} ({member_count} files, artifacts={args.artifacts_root})")
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

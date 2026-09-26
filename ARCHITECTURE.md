@@ -9,13 +9,13 @@ Toàn bộ workflow là **Python async state-machine thuần**, deterministic, k
 inputs/<case_id>.json
       │  case_received (cli)
       ▼
-┌─────────────┐ task_assigned  ┌──────────────┐  MCP: get_order, get_order_items, get_sellers
+┌─────────────┐ task_assigned  ┌──────────────┐  MCP: get_order, get_order_items
 │ Coordinator │──────────────▶│ order-agent  │──────────────────────────────────────────────┐
 │ (workflow.py│◀──────────────│              │  handoff(facts_ready, evidence_refs)          │
 │  solve_case)│               └──────────────┘                                               │
 │             │ task_assigned  ┌──────────────┐  MCP: get_order_payments,                    │
 │             │──────────────▶│payment-agent │       get_payment_timeline,                   │  tool_result_consumed
-│             │◀──────────────│  (song song) │       get_refund_timeline                    ├─▶ traces/trace.jsonl
+│             │◀──────────────│              │       get_refund_timeline                    ├─▶ traces/trace.jsonl
 │             │ task_assigned  ┌──────────────┐  MCP: get_shipment_summary                   │
 │             │──────────────▶│shipment-agent│                                               │
 │             │◀──────────────└──────────────┘                                               │
@@ -29,9 +29,17 @@ inputs/<case_id>.json
       │  output → outputs/<case_id>.json, case_finalized (cli)
 ```
 
-Module: `a2a.py` (envelope + bus), `agents.py` (specialists + MCP access), `facts.py`
-(đọc payload), `policy.py` (luật trọng tài), `verifier.py`, `workflow.py` (coordinator),
-`probe.py` (`day09 probe`, chỉ dùng để hiệu chỉnh, output nằm trong `debug/` và không được đóng gói).
+Module chính trong `src/student_agent/`:
+
+- `cli.py`: lệnh `day09`, chạy case, validate artifact và đóng gói submission.
+- `cases.py`, `contracts.py`, `config.py`: đọc input, schema public contract và cấu hình `.env`.
+- `mcp_gateway.py`: kết nối MCP Evidence Gateway, luôn truyền `case_id` vào payload tool.
+- `specialists/`: collector và các specialist `order-agent`, `payment-agent`, `shipment-agent`.
+- `workflow.py`: coordinator deterministic, phân tích facts, chọn evidence, gọi verifier.
+- `policy.py`: fallback policy local cho unit test và logic tham chiếu.
+- `verifier.py`: chuẩn hóa output cuối, chặn inconsistency trước khi ghi.
+- `trace.py`: ghi trace event theo `trace-event-v1`.
+- `submission.py`: validate artifact, build manifest và tạo ZIP đúng contract.
 
 ## 2. Agent ownership
 
@@ -48,7 +56,7 @@ Quyền gọi tool (được enforce trong `Specialist.fetch`, gọi tool ngoài
 
 | Agent | Tools được phép |
 | --- | --- |
-| order-agent | `get_order`, `get_order_items`, `get_sellers`, `get_product_context` |
+| order-agent | `get_order`, `get_order_items` |
 | payment-agent | `get_order_payments`, `get_payment_timeline`, `get_refund_timeline` |
 | shipment-agent | `get_shipment_summary` |
 | policy-agent | `get_policy` |
@@ -58,7 +66,8 @@ Quyền gọi tool (được enforce trong `Specialist.fetch`, gọi tool ngoài
 có rủi ro bị trừ điểm do trích dẫn domain không liên quan.
 
 Tham số tool được lấy từ `inputSchema` mà server công bố (tool discovery). Nếu thiếu một tham số
-bắt buộc thì agent **bỏ qua lời gọi**, không đoán id.
+bắt buộc thì agent **bỏ qua lời gọi**, không đoán id. `get_sellers` và `get_product_context` chỉ
+được thêm vào workflow khi server trả ổn định và dữ liệu đó thực sự được cite trong output.
 
 ## 3. A2A protocol
 
@@ -109,8 +118,12 @@ Verifier kiểm tra các điều sau trước khi finalize:
 
 - Không dùng LLM, không có random seed. Cùng dữ liệu MCP sẽ cho cùng output.
 - Dependency theo `pyproject.toml` (`mcp>=2,<3`, `httpx2>=2,<3`, `jsonschema>=4.25`), Python 3.11.
-- Concurrency: xử lý tuần tự từng case. Trong một case, payment và shipment chạy song song.
-- Lệnh chạy: `day09 validate-inputs`, `day09 run`, `day09 validate`,
-  `day09 package --output dist/submission.zip`.
+- Concurrency: mặc định chạy tuần tự; khi cần benchmark nhanh dùng `day09 run --workers 4`.
+  Mỗi worker xử lý một case riêng, sau đó CLI gộp trace theo thứ tự case để dễ audit.
+- Lệnh chạy submit chuẩn: `day09 validate-inputs`,
+  `day09 run --artifacts-root dist/run-artifacts --workers 4`,
+  `day09 validate --artifacts-root dist/run-artifacts`,
+  `day09 package --artifacts-root dist/run-artifacts --output dist/submission.zip`.
 - Ngưỡng tính toán: `MONEY_TOL = 0.05 BRL`, `LATE_TOL_HOURS = 24`, `CONFLICT_TOL_HOURS = 24`.
-- API key chỉ nằm trong `.env`. `probe` từ chối ghi file nếu phát hiện key trong payload.
+- API key chỉ nằm trong `.env`. `day09 package` kiểm tra secret pattern trong output/trace và
+  kiểm tra ZIP cuối chỉ chứa `manifest.json`, `trace.jsonl`, `outputs/<case_id>.json`.

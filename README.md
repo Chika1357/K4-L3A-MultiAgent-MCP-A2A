@@ -144,26 +144,29 @@ Competition không chấm tên framework hay số lượng class. Scorer đánh 
 
 Hoàn thiện mô tả thiết kế trong `ARCHITECTURE.md`.
 
-## 6. Chạy và kiểm tras
+## 6. Chạy và kiểm tra
 
 ```bash
-day09 run
-day09 validate
+day09 run --artifacts-root dist/run-artifacts --workers 4
+day09 validate --artifacts-root dist/run-artifacts
 ```
 
-Kết quả được tạo tại:
+Kết quả được tạo tại artifact root đã chọn:
 
 ```text
-outputs/<case_id>.json
-traces/trace.jsonl
+dist/run-artifacts/
+├── outputs/<case_id>.json
+└── traces/trace.jsonl
 ```
+
+Nên dùng một artifact root sạch cho mỗi lần benchmark/submission để tránh trộn trace hoặc output từ lần chạy cũ.
 
 Nếu output pass schema nhưng điểm thấp, cần kiểm tra lại semantic, evidence, consistency, confidence và workflow — schema chỉ là một phần nhỏ của điểm.
 
 ## 7. Đóng gói và nộp bài
 
 ```bash
-day09 package --output dist/submission.zip
+day09 package --artifacts-root dist/run-artifacts --output dist/submission.zip
 ```
 
 ZIP chỉ được chứa:
@@ -174,7 +177,7 @@ trace.jsonl
 outputs/<case_id>.json
 ```
 
-Không đưa source, input, `.env`, API key hoặc debug log vào ZIP. Sau đó upload `dist/submission.zip` tại workspace `/l3a`
+Không đưa source, input, `.env`, API key, thư mục `traces/` hoặc debug log vào ZIP. Lệnh `day09 package` sẽ validate lại artifact, kiểm tra trace lifecycle, kiểm tra `evidence_ref` đã được consume trong cùng case, rồi kiểm tra ZIP sau khi ghi. Sau đó upload `dist/submission.zip` tại workspace `/l3a`.
 
 ## Tiêu chí chấm điểm công khai
 
